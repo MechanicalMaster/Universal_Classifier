@@ -131,18 +131,29 @@ curl -X POST "http://localhost:8000/process-documents" \
             "processing_time": 2.5
           },
           "extracted_content": {
-            "text_content": "Extracted text from the document...",
-            "document_type": "invoice",
-            "key_information": {
-              "dates": ["2024-01-01"],
-              "amounts": ["$100.00"],
-              "names": ["John Doe"],
-              "addresses": ["123 Main St"],
-              "phone_numbers": ["+1-555-0123"],
-              "email_addresses": ["john@example.com"]
+            "document_class": "FINANCIAL_STATEMENT",
+            "entities": {
+              "borrower_name": {"value": "John Doe", "normalized_value": "John Doe", "confidence": 0.95, "source": {...}},
+              "company_name": {"value": "ABC Corp", "normalized_value": "ABC Corp", "confidence": 0.90, "source": {...}},
+              "pan_number": {"value": "ABCDE1234F", "normalized_value": "ABCDE1234F", "confidence": 0.98, "source": {...}},
+              "financials": [
+                {
+                  "year": "2023",
+                  "turnover": {"value": "₹1,00,000", "normalized_value": 100000, "confidence": 0.92, "source": {...}},
+                  "net_profit": {"value": "₹15,000", "normalized_value": 15000, "confidence": 0.88, "source": {...}}
+                }
+              ]
             },
-            "tables": [],
-            "confidence": "high"
+            "tables": [
+              {
+                "title": "Financial Summary",
+                "headers": ["Year", "Revenue", "Profit"],
+                "rows": [["2023", "100000", "15000"]],
+                "row_confidences": [0.92]
+              }
+            ],
+            "text_content": "Extracted text from the document...",
+            "overall_confidence": 0.91
           }
         }
       ],

@@ -118,12 +118,43 @@ class DataAggregator:
                     processing_time=vision_result.get('processing_time', 0.0)
                 )
                 
+                # Handle new schema format with documents array
                 extracted_content = vision_result.get('extracted_content', {})
+                
+                # If the extracted content has the new schema format, process it
+                if 'documents' in extracted_content and isinstance(extracted_content['documents'], list):
+                    # For now, take the first document from the array
+                    # In the future, this could be enhanced to handle multiple documents per page
+                    if extracted_content['documents']:
+                        document_data = extracted_content['documents'][0]
+                        # Transform the new schema to be compatible with existing downstream processing
+                        processed_content = {
+                            'document_class': document_data.get('document_class', 'OTHER'),
+                            'entities': document_data.get('entities', {}),
+                            'tables': document_data.get('tables', []),
+                            'text_content': document_data.get('text_content', ''),
+                            'overall_confidence': document_data.get('overall_confidence', 0.0),
+                            'document_id': document_data.get('document_id'),
+                            'file_name': document_data.get('file_name', 'unknown')
+                        }
+                    else:
+                        # Empty documents array
+                        processed_content = {
+                            'document_class': 'OTHER',
+                            'entities': {},
+                            'tables': [],
+                            'text_content': '',
+                            'overall_confidence': 0.0
+                        }
+                else:
+                    # Fallback for old schema or unexpected format
+                    processed_content = extracted_content
+                
                 raw_response = vision_result.get('raw_response') if include_raw_responses else None
                 
                 extracted_data.append(ExtractedData(
                     page_metadata=page_metadata,
-                    extracted_content=extracted_content,
+                    extracted_content=processed_content,
                     raw_response=raw_response
                 ))
                 

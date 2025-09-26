@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = Field(default=30, description="API rate limit per minute (conservative)")
     
     # Vision API Configuration
-    vision_model: str = Field(default="gpt-4o", description="Vision model to use")
+    vision_model: str = Field(default="gpt-4o", description="Latest GPT-4o vision model")
     max_retries: int = Field(default=3, description="Maximum retries for API calls")
     retry_delay: float = Field(default=1.0, description="Initial retry delay in seconds")
     

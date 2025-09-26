@@ -20,6 +20,21 @@ class DocumentType(str, Enum):
     ZIP = "zip"
 
 
+class DocumentClass(str, Enum):
+    """Document class enumeration for credit underwriting."""
+    PAN_FIRM = "PAN_FIRM"
+    PAN_INDIVIDUAL = "PAN_INDIVIDUAL"
+    AADHAAR_INDIVIDUAL = "AADHAAR_INDIVIDUAL"
+    UDYAM_REGISTRATION = "UDYAM_REGISTRATION"
+    PARTNERSHIP_DEED = "PARTNERSHIP_DEED"
+    GST_CERTIFICATE = "GST_CERTIFICATE"
+    BANK_STATEMENT = "BANK_STATEMENT"
+    FINANCIAL_STATEMENT = "FINANCIAL_STATEMENT"
+    ITR_INDIVIDUAL = "ITR_INDIVIDUAL"
+    ITR_FIRM = "ITR_FIRM"
+    OTHER = "OTHER"
+
+
 class ErrorCategory(str, Enum):
     """Error category enumeration."""
     FILE_FORMAT = "file_format"

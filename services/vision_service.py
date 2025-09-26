@@ -230,9 +230,20 @@ class VisionService:
                 else:
                     # Other API error
                     error_msg = f"API error {response.status_code}: {response.text}"
+                    
+                    # Handle specific error codes
+                    if response.status_code == 502:
+                        error_msg = f"OpenAI API server error (502 Bad Gateway): {response.text}"
+                        retry_suggestion = "OpenAI servers are experiencing issues, try again in a few minutes"
+                    elif response.status_code == 503:
+                        error_msg = f"OpenAI API service unavailable (503): {response.text}"
+                        retry_suggestion = "OpenAI service is temporarily unavailable, try again later"
+                    else:
+                        retry_suggestion = "Try again later or contact support"
+                    
                     if attempt < self.max_retries:
                         wait_time = self.retry_delay * (2 ** attempt)
-                        logger.warning(f"API error, retrying in {wait_time}s (attempt {attempt + 1})")
+                        logger.warning(f"API error {response.status_code}, retrying in {wait_time}s (attempt {attempt + 1})")
                         await asyncio.sleep(wait_time)
                         continue
                     else:
@@ -241,7 +252,7 @@ class VisionService:
                             ErrorCategory.API_FAILURE,
                             error_msg,
                             time.time() - start_time,
-                            "Try again later or contact support"
+                            retry_suggestion
                         )
             
             except httpx.TimeoutException:
@@ -262,9 +273,10 @@ class VisionService:
             
             except Exception as e:
                 error_msg = f"Unexpected error: {str(e)}"
-                logger.error(f"Unexpected error processing page {page_id}: {e}")
+                logger.error(f"Unexpected error processing page {page_id}: {e}", exc_info=True)
                 if attempt < self.max_retries:
                     wait_time = self.retry_delay * (2 ** attempt)
+                    logger.warning(f"Retrying after unexpected error in {wait_time}s (attempt {attempt + 1})")
                     await asyncio.sleep(wait_time)
                     continue
                 else:
@@ -294,7 +306,7 @@ class VisionService:
             return None
     
     def _create_vision_request(self, base64_image: str) -> Dict[str, Any]:
-        """Create Vision API request payload."""
+        """Create Vision API request payload with expanded schema prompt."""
         return {
             "model": self.model,
             "messages": [
@@ -303,30 +315,87 @@ class VisionService:
                     "content": [
                         {
                             "type": "text",
-                            "text": """Please analyze this document image and extract all text content and any structured data you can identify. 
-                            
-                            Return your response as a JSON object with the following structure:
-                            {
-                                "text_content": "All readable text from the document",
-                                "document_type": "invoice|receipt|form|letter|table|other",
-                                "key_information": {
-                                    "dates": [],
-                                    "amounts": [],
-                                    "names": [],
-                                    "addresses": [],
-                                    "phone_numbers": [],
-                                    "email_addresses": []
-                                },
-                                "tables": [
-                                    {
-                                        "headers": [],
-                                        "rows": []
-                                    }
-                                ],
-                                "confidence": "high|medium|low"
-                            }
-                            
-                            Be thorough and accurate. If you cannot read certain parts clearly, note this in the confidence field."""
+                            "text": """You are an expert document parser for credit underwriting.  
+You will receive one or more scanned documents or images. Your job: extract underwriting datapoints into a strict, machine-friendly JSON. Do not add any commentary. Return **valid JSON only**.
+
+### Supported document classes (choose the best fit; if none match, use OTHER)
+PAN_FIRM, PAN_INDIVIDUAL, AADHAAR_INDIVIDUAL, UDYAM_REGISTRATION, PARTNERSHIP_DEED,
+GST_CERTIFICATE, BANK_STATEMENT, FINANCIAL_STATEMENT, ITR_INDIVIDUAL, ITR_FIRM, OTHER
+
+### RULES (must follow)
+1. If multiple files/pages are provided, return an array `documents` where each element follows the schema below.  
+2. For every field you extract, include:  
+   - `value` (exact text as seen),  
+   - `normalized_value` (cleaned type: numbers/dates in canonical format),  
+   - `confidence` (0–1),  
+   - `source` {file_name, page_number, snippet, bbox? (optional)}.  
+3. If a required field is not present, set its value to the string `"INSUFFICIENT_DATA"`. Do NOT guess.  
+4. Normalize aggressively: dates → `YYYY-MM-DD`; currency → integer (INR: 1234567); percentages → numeric; names → preserve case but trim whitespace.  
+5. Validate identification numbers (PAN / Aadhaar / GST / IFSC) per rules below; if invalid, put `"INVALID"` in `normalized_value`.  
+6. For tabular data (statements, financials, invoices) return structured `tables` with `headers`, `rows` (each row as list), and `row_confidences`.  
+7. Always include `text_content` (raw OCR text) for the document.
+
+### OUTPUT SCHEMA (strict)
+Return a JSON object like this:
+
+{
+  "documents": [
+    {
+      "document_id": "string (optional uuid)",
+      "file_name": "string",
+      "document_class": "one of the supported classes",
+      "entities": {
+        "borrower_name": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "company_name": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "constitution": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "registered_address": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "pan_number": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "gst_number": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "aadhaar_number": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "udyam_registration_number": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+        "partnership_start_date": {"value":"...","normalized_value":"YYYY-MM-DD","confidence":0.0,"source":{...}},
+        "promoters": [
+          {
+            "name": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+            "pan_number": {...},
+            "aadhaar_number": {...},
+            "shareholding_percent": {"value":"...","normalized_value":0.0,"confidence":0.0,"source":{...}}
+          }
+        ],
+        "financials": [
+          {
+            "year": "YYYY",
+            "turnover": {"value":"...","normalized_value":0.0,"confidence":0.0,"source":{...}},
+            "net_profit": {...},
+            "ebitda": {...},
+            "total_assets": {...},
+            "total_liabilities": {...}
+          }
+        ],
+        "banking": {
+          "bank_name": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+          "account_number": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+          "ifsc_code": {"value":"...","normalized_value":"...","confidence":0.0,"source":{...}},
+          "avg_monthly_balance": {"value":"...","normalized_value":0.0,"confidence":0.0,"source":{...}}
+        },
+        "top_suppliers": [{"name":{...},"amount":{...},"percent_of_purchases":{...}}],
+        "top_buyers": [{"name":{...},"amount":{...},"percent_of_sales":{...}}],
+        "itr_assessment_year": {"value":"...","normalized_value":"YYYY","confidence":0.0,"source":{...}},
+        "other_fields": {}
+      },
+      "tables": [
+        {
+          "title": "string or INSUFFICIENT_DATA",
+          "headers": ["..."],
+          "rows": [["col1","col2",12345]],
+          "row_confidences": [0.9]
+        }
+      ],
+      "text_content": "full raw OCR text",
+      "overall_confidence": 0.0
+    }
+  ]
+}"""
                         },
                         {
                             "type": "image_url",
@@ -347,31 +416,76 @@ class VisionService:
             # Get the response content
             content = api_response['choices'][0]['message']['content']
             
+            # Clean up the content - remove markdown code blocks if present
+            cleaned_content = content.strip()
+            if cleaned_content.startswith('```json'):
+                # Remove ```json from start and ``` from end
+                cleaned_content = cleaned_content[7:]  # Remove ```json
+                if cleaned_content.endswith('```'):
+                    cleaned_content = cleaned_content[:-3]  # Remove ```
+                cleaned_content = cleaned_content.strip()
+            elif cleaned_content.startswith('```'):
+                # Remove generic ``` blocks
+                lines = cleaned_content.split('\n')
+                if lines[0].strip() == '```' and lines[-1].strip() == '```':
+                    cleaned_content = '\n'.join(lines[1:-1])
+                elif lines[-1].strip() == '```':
+                    cleaned_content = '\n'.join(lines[:-1])
+                    if cleaned_content.startswith('```'):
+                        cleaned_content = cleaned_content[3:]
+                cleaned_content = cleaned_content.strip()
+            
             # Try to parse as JSON
             try:
-                extracted_data = json.loads(content)
-                return extracted_data
-            except json.JSONDecodeError:
-                # If not valid JSON, return raw text
-                logger.warning("Vision API returned non-JSON response, returning raw text")
+                extracted_data = json.loads(cleaned_content)
+                
+                # Validate that it follows the new schema structure
+                if "documents" in extracted_data and isinstance(extracted_data["documents"], list):
+                    logger.info(f"Successfully parsed Vision API response with {len(extracted_data['documents'])} documents")
+                    return extracted_data
+                else:
+                    # If it's not in the expected format, wrap it in the new schema
+                    logger.warning("Vision API response not in expected schema format, wrapping in new structure")
+                    return {
+                        "documents": [{
+                            "document_id": None,
+                            "file_name": "unknown",
+                            "document_class": "OTHER",
+                            "entities": {},
+                            "tables": extracted_data.get("tables", []),
+                            "text_content": extracted_data.get("text_content", content),
+                            "overall_confidence": 0.5
+                        }]
+                    }
+                    
+            except json.JSONDecodeError as e:
+                # If not valid JSON, return in new schema format with raw text
+                logger.warning(f"Vision API returned non-JSON response: {e}")
+                logger.debug(f"Cleaned content that failed to parse: {cleaned_content[:500]}...")
                 return {
-                    "text_content": content,
-                    "document_type": "other",
-                    "key_information": {},
-                    "tables": [],
-                    "confidence": "low",
-                    "raw_response": True
+                    "documents": [{
+                        "document_id": None,
+                        "file_name": "unknown",
+                        "document_class": "OTHER",
+                        "entities": {},
+                        "tables": [],
+                        "text_content": content,
+                        "overall_confidence": 0.1
+                    }]
                 }
         
         except Exception as e:
             logger.error(f"Failed to parse Vision API response: {e}")
             return {
-                "text_content": "Failed to parse response",
-                "document_type": "other",
-                "key_information": {},
-                "tables": [],
-                "confidence": "low",
-                "error": str(e)
+                "documents": [{
+                    "document_id": None,
+                    "file_name": "unknown",
+                    "document_class": "OTHER",
+                    "entities": {},
+                    "tables": [],
+                    "text_content": "Failed to parse response",
+                    "overall_confidence": 0.0
+                }]
             }
     
     def _create_error_result(self, page_id: str, page_number: int, 

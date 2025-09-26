@@ -209,12 +209,15 @@ rate_limit_tracker = RateLimitTracker()
 
 def estimate_openai_cost(model: str, image_count: int) -> float:
     """Estimate OpenAI API cost based on model and image count."""
-    # Cost estimates (as of 2024, subject to change)
+    # Cost estimates (as of September 2024, subject to change)
+    # GPT-4o pricing: $2.50 per 1M input tokens, $10.00 per 1M output tokens
+    # For vision: approximately $0.00765 per image (1024x1024)
     costs = {
-        'gpt-4-vision-preview': 0.01,  # per image
-        'gpt-4o': 0.0075,  # per image
-        'gpt-4o-mini': 0.00025,  # per image
+        'gpt-4-vision-preview': 0.01,  # per image (legacy)
+        'gpt-4o': 0.00765,  # per image (latest pricing)
+        'gpt-4o-mini': 0.00025,  # per image (mini version)
+        'gpt-4o-2024-08-06': 0.00765,  # specific version
     }
     
-    base_cost = costs.get(model, 0.01)
+    base_cost = costs.get(model, 0.00765)  # Default to gpt-4o pricing
     return base_cost * image_count
